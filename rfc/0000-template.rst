@@ -108,9 +108,6 @@ Explicitly list any remaining issues that remain in the conceptual design and
 specification. Be upfront and trust that the community will help. Please do
 not list *implementation* issues.
 
-Hopefully this section will be empty by the time the proposal is brought to
-the steering committee.
-
 Implementation Plan
 -------------------
 (Optional) If accepted who will implement the change? Which other resources
