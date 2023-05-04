@@ -149,9 +149,22 @@ client:
 
 ..  code-block:: python
 
-    >> hl._set_flags(fast_restarts=True)
+    >> hl._set_flags(use_fast_restarts=True)
     >> hl._set_flags(cachedir='gs://my-bucket/cache/0')
 
+
+Alternatively, users can set the corresponding environment variables at the
+command line prior to starting their python session:
+
+..  code-block:: sh
+
+    > HAIL_USE_FAST_RESTARTS=1 HAIL_CACHE_DIR='gs://my-bucket/object-prefix' ipython
+
+Notes:
+- The definition of the [python]`cachedir` does not imply
+  [python]`use_fast_restarts`.
+- If [python]`use_fast_restarts` is defined, hail will write cache entries to
+  a subfolder of the [python]`tmpdir` by default.
 
 Effect and Interactions
 =======================
