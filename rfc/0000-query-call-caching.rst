@@ -161,10 +161,11 @@ command line prior to starting their python session:
     > HAIL_USE_FAST_RESTARTS=1 HAIL_CACHE_DIR='gs://my-bucket/object-prefix' ipython
 
 Notes:
-- The definition of the [python]`cachedir` does not imply
-  [python]`use_fast_restarts`.
-- If [python]`use_fast_restarts` is defined, hail will write cache entries to
-  a subfolder of the [python]`tmpdir` by default.
+
+- The definition of the ``cachedir`` does not imply
+  ``use_fast_restarts``.
+- If ``use_fast_restarts`` is defined, hail will write cache entries to
+  a subfolder of the ``tmpdir`` by default.
 
 Effect and Interactions
 =======================
@@ -227,6 +228,77 @@ a user specifies otherwise.
   - atomic writes, via db or file re-writes
   - one wins, doesn't matter which
 * Should users "bring-their-own"\ :sup:`TM` cache?
+
+
+How to eliminate the effects of compiler-generated names?
+---------------------------------------------------------
+The compiler generates names for struct fields.
+Thus, semantic hashes of struct expressions that use compiler-generated names in
+the computation for the hash will not hash to the same value.
+This is problematic as semantic-hashing is a forward data-flow computation -
+different hashes upstream will cause the rest of the query to cache-miss,
+despite being the same program.
+
+One approach might be to maintain a record of every struct definition, mapping
+field names to their definitions.
+When we encounter a :scala:`GetField` expression, we look up the :scala:`IR`
+that defined that field and fetch its semantic hash.
+
+The problem with this is it assumes that every use of an
+expression of type :scala:`TStruct` has a unique corresponding
+:scala:`MakeStruct` definition.
+This is not true in the :scala:`IR`, as that struct could be generated from
+a read of a partition or from an empty stream of type :scala:`TStruct`, or from
+many :scala:`MakeStruct` nodes.
+
+Consider the following fragment:
+
+..  code-block:: scala
+
+    StreamMap(inputstream, "x",
+      GetField(Ref("x", TStruct("__ruid_XXXX" -> TInt), "__ruid_XXXX"))
+    )
+
+In order to eliminate the compiler-generated name :scala:`"__ruid_XXXX"`, we
+have to analyse through the reference :scala:`"x"`.
+The :scala:`IR` doesn't define a binding for :scala:`"x"` statically, nor indeed
+can it in the general case.
+To illustrate this point, consider the two cases below:
+
+1. more than one definition
+
+..  code-block:: scala
+
+    val typ = TStruct("__ruid_XXXX" -> TInt)
+    val inputstream =
+      MakeStream(
+        MakeArray(
+          Array(
+            MakeStruct("__ruid_XXXX" -> I32(0)),
+            MakeStruct("__ruid_XXXX" -> I32(1))
+          ),
+          TArray(typ)
+        ),
+        TStream(typ)
+      )
+
+
+Now, in our :scala:`StreamMap` example above, we cannot map
+:scala:`"__ruid_XXXX"` to a unique definition.
+
+2. no definitions
+
+..  code-block:: scala
+
+    val typ = TStruct("__ruid_XXXX" -> TInt)
+    val inputstream =
+      MakeStream(
+        MakeArray(Array.empty, TArray(typ)),
+        TStream(typ)
+      )
+
+Now, our :scala:`StreamMap` example will never execute. Is semantic hashing
+meant to detect this and eliminate such expressions?
 
 Implementation Plan
 ===================
