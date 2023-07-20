@@ -308,8 +308,9 @@ high degree of parallelism. This is necessary for batches with more
 than a million jobs.
 
 
+--------------------------------------
 Flow for Creating and Updating Batches
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+--------------------------------------
 
 The following flow is used to create a new batch or update an existing
 batch with a set of job specifications:
@@ -348,8 +349,9 @@ there are fewer than 100 jobs at
 ``/api/v1alpha/batches/{batch_id}/update-fast``.
 
 
+------------------------
 Listing Batches and Jobs
-~~~~~~~~~~~~~~~~~~~~~~~~
+------------------------
 
 To find all matching batches and jobs either via the UI or the Python
 client library, a user provides a query filtering string as well as an
@@ -376,8 +378,9 @@ pod to handle TLS handshakes to avoid excess CPU usage of the batch
 driver.
 
 
+--------------------
 Instance Collections
-~~~~~~~~~~~~~~~~~~~~
+--------------------
 
 The batch driver maintains two different types of collections of
 workers. There are **pools** that are multi-tenant and have a
@@ -393,8 +396,9 @@ worker requests a specific machine type. This is used commonly for
 jobs that require more memory than a 16 core machine can provide.
 
 
+----------
 Fair Share
-~~~~~~~~~~
+----------
 
 In order to avoid having one user starve other users from getting
 their jobs run, we use the following fair share algorithm. We start
@@ -407,8 +411,9 @@ either exhausted all free cores in the cluster or have satisfied all
 user resource requests.
 
 
+----------
 Autoscaler
-~~~~~~~~~~
+----------
 
 At a high level, the autoscaler is in charge of figuring out how many
 worker VMs are required to run all of the jobs that are ready to run
@@ -456,8 +461,9 @@ to spin up per region:
    the possible regions the instance can be spun up in.
 
 
+---------
 Scheduler
-~~~~~~~~~
+---------
 
 The scheduler finds the set of jobs to schedule by iterating through
 each user in fair share order and then scheduling jobs with a "Ready"
@@ -481,8 +487,9 @@ try and reschedule the same job multiple times before the original
 operation to schedule the job in the database completes.
 
 
+-----------------
 Job State Updates
-~~~~~~~~~~~~~~~~~
+-----------------
 
 There are three main job state update operations:
 - SJ: Schedule Job
@@ -528,8 +535,9 @@ of no-op true jobs). We should be able to handle 80 jobs per second,
 but the goal is ultimately 200 jobs per second.
 
 
+---------
 Canceller
-~~~~~~~~~
+---------
 
 The canceller consists of three background loops that cancel any
 ready, running, or creating jobs in batches that have been cancelled
@@ -540,8 +548,9 @@ multiplying by 300 jobs to cancel in each iteration with a minimum of
 20 jobs per user.
 
 
+---------------
 Billing Updates
-~~~~~~~~~~~~~~~
+---------------
 
 To provide users with real time billing and effectively enforce
 billing limits, we have the worker send us the job attempts it has
@@ -552,16 +561,18 @@ end time. The rollup time is then used in billing calculations to
 figure out the duration the job has been running thus far.
 
 
+----------------
 Quota Exhaustion
-~~~~~~~~~~~~~~~~
+----------------
 
 There is a mechanism in GCP by which
 we monitor our current quotas and assign jobs that can be run in any
 region to a different region if we've exceeded our quota.
 
 
+----------------------
 Cloud Price Monitoring
-~~~~~~~~~~~~~~~~~~~~~~
+----------------------
 
 We periodically call the corresponding cloud APIs to get up to date
 billing information and update the current rates of each product used
