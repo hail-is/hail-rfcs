@@ -591,25 +591,27 @@ previously discussed how the database operations SJ, MJS, and MJC
 work.
 
 There are three key principles in how the database is structured.
+
 1. Any values that are dynamic should be separated from tables that
-   have static state. For example, to represent that a batch is
-   cancelled, we have a separate ``batches_cancelled`` table rather
-   than adding a cancelled field to the ``batches`` table.
+have static state. For example, to represent that a batch is
+cancelled, we have a separate ``batches_cancelled`` table rather
+than adding a cancelled field to the ``batches`` table.
+
 2. Any tables with state that is updated in parallel should be
-   "tokenized" in order to reduce contention for updating rows. For
-   example, when keeping track of the number of running jobs per user
-   per instance collection, we'll need to update this count for every
-   schedule job operation. If there is only one row representing this
-   value, we'll end up serializing the schedule operations as each one
-   waits for the exclusive write lock. To avoid this, we have up to
-   200 rows per value we want to represent where each row has a unique
-   "token". This way concurrent transactions can update rows
-   simultaneously and the probability of serialized writes is
-   equivalent to the birthday problem in mathematics. Note that there
-   is a drawback to this approach in that queries to obtain the actual
-   value are more complicated to write as they include an aggregation
-   and the number of rows to store this in the database can make
-   queries slower and data more expensive to store.
+"tokenized" in order to reduce contention for updating rows. For
+example, when keeping track of the number of running jobs per user
+per instance collection, we'll need to update this count for every
+schedule job operation. If there is only one row representing this
+value, we'll end up serializing the schedule operations as each one
+waits for the exclusive write lock. To avoid this, we have up to
+200 rows per value we want to represent where each row has a unique
+"token". This way concurrent transactions can update rows
+simultaneously and the probability of serialized writes is
+equivalent to the birthday problem in mathematics. Note that there
+is a drawback to this approach in that queries to obtain the actual
+value are more complicated to write as they include an aggregation
+and the number of rows to store this in the database can make
+queries slower and data more expensive to store.
 
 Key tables have triggers on them to support billing, job state counts,
 and fast cancellation which will be described in more detail below.
