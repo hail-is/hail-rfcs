@@ -41,7 +41,7 @@ enhance the user experience. This overall vision for job groups does
 not preclude simpler approaches that build up to the full
 functionality described here.
 
-
+----------
 Motivation
 ----------
 
@@ -145,6 +145,7 @@ more expressive and flexible way of interacting with jobs in a batch
 for future use cases.
 
 
+----------------------------
 How the Current System Works
 ----------------------------
 
@@ -169,9 +170,9 @@ The exact implementation details of each component will be described
 separately in a different developer document (does not exist yet).
 
 
-===============
+~~~~~~~~~~~~~~~
 Batch Lifecycle
-===============
+~~~~~~~~~~~~~~~
 
 1. A user submits a request to the Batch front end service to create a
    batch along with job specifications.
@@ -201,9 +202,9 @@ Batch Lifecycle
    End until the batch state is "complete".
 
 
-==========
+~~~~~~~~~~
 Data Model
-==========
+~~~~~~~~~~
 
 The core concepts in the Batch data model are billing projects,
 batches, jobs, updates, attempts, and resources.
@@ -256,9 +257,9 @@ is in mCPU). To compute the aggregate cost of a job, we sum up all of
 the usages multiplied by the rates and then multiplied by the duration
 the attempt has been running.
 
-=============
+~~~~~~~~~~~~~
 State Diagram
-=============
+~~~~~~~~~~~~~
 
 A job can be in one of the following states:
 
@@ -292,9 +293,9 @@ The batch and job states are critical for database performance and
 must be indexed appropriately.
 
 
-===============
+~~~~~~~~~~~~~~~
 Batch Front End
-===============
+~~~~~~~~~~~~~~~
 
 The Batch Front End service (batch) is a stateless web service that
 handles requests from the user. The front end exposes a REST API
@@ -308,9 +309,9 @@ high degree of parallelism. This is necessary for batches with more
 than a million jobs.
 
 
---------------------------------------
+**************************************
 Flow for Creating and Updating Batches
---------------------------------------
+**************************************
 
 The following flow is used to create a new batch or update an existing
 batch with a set of job specifications:
@@ -349,9 +350,9 @@ there are fewer than 100 jobs at
 ``/api/v1alpha/batches/{batch_id}/update-fast``.
 
 
-------------------------
+************************
 Listing Batches and Jobs
-------------------------
+************************
 
 To find all matching batches and jobs either via the UI or the Python
 client library, a user provides a query filtering string as well as an
@@ -360,9 +361,9 @@ response and it is up to the client to send the next request with the
 ID of the last record returned in the subsequent request.
 
 
-============
+~~~~~~~~~~~~
 Batch Driver
-============
+~~~~~~~~~~~~
 
 The Batch Driver is a Kubernetes service that creates a fleet of
 worker VMs in response to user workloads and has mechanisms in place
@@ -378,9 +379,9 @@ pod to handle TLS handshakes to avoid excess CPU usage of the batch
 driver.
 
 
---------------------
+********************
 Instance Collections
---------------------
+********************
 
 The batch driver maintains two different types of collections of
 workers. There are **pools** that are multi-tenant and have a
@@ -396,9 +397,9 @@ worker requests a specific machine type. This is used commonly for
 jobs that require more memory than a 16 core machine can provide.
 
 
-----------
+**********
 Fair Share
-----------
+**********
 
 In order to avoid having one user starve other users from getting
 their jobs run, we use the following fair share algorithm. We start
@@ -411,9 +412,9 @@ either exhausted all free cores in the cluster or have satisfied all
 user resource requests.
 
 
-----------
+**********
 Autoscaler
-----------
+**********
 
 At a high level, the autoscaler is in charge of figuring out how many
 worker VMs are required to run all of the jobs that are ready to run
@@ -461,9 +462,9 @@ to spin up per region:
    the possible regions the instance can be spun up in.
 
 
----------
+*********
 Scheduler
----------
+*********
 
 The scheduler finds the set of jobs to schedule by iterating through
 each user in fair share order and then scheduling jobs with a "Ready"
@@ -487,9 +488,9 @@ try and reschedule the same job multiple times before the original
 operation to schedule the job in the database completes.
 
 
------------------
+*****************
 Job State Updates
------------------
+*****************
 
 There are three main job state update operations:
 - SJ: Schedule Job
@@ -535,9 +536,9 @@ of no-op true jobs). We should be able to handle 80 jobs per second,
 but the goal is ultimately 200 jobs per second.
 
 
----------
+*********
 Canceller
----------
+*********
 
 The canceller consists of three background loops that cancel any
 ready, running, or creating jobs in batches that have been cancelled
@@ -548,9 +549,9 @@ multiplying by 300 jobs to cancel in each iteration with a minimum of
 20 jobs per user.
 
 
----------------
+***************
 Billing Updates
----------------
+***************
 
 To provide users with real time billing and effectively enforce
 billing limits, we have the worker send us the job attempts it has
@@ -561,27 +562,27 @@ end time. The rollup time is then used in billing calculations to
 figure out the duration the job has been running thus far.
 
 
-----------------
+****************
 Quota Exhaustion
-----------------
+****************
 
-There is a mechanism in GCP by which
-we monitor our current quotas and assign jobs that can be run in any
-region to a different region if we've exceeded our quota.
+There is a mechanism in GCP by which we monitor our current quotas and
+assign jobs that can be run in any region to a different region if
+we've exceeded our quota.
 
 
-----------------------
+**********************
 Cloud Price Monitoring
-----------------------
+**********************
 
 We periodically call the corresponding cloud APIs to get up to date
 billing information and update the current rates of each product used
 accordingly.
 
 
-========
+~~~~~~~~
 Database
-========
+~~~~~~~~
 
 The batch database has a series of tables, triggers, and stored
 procedures that are used to keep track of the state of billing
@@ -614,9 +615,9 @@ Key tables have triggers on them to support billing, job state counts,
 and fast cancellation which will be described in more detail below.
 
 
-=======
+~~~~~~~
 Billing
-=======
+~~~~~~~
 
 Billing is implemented by keeping track of the resources each attempt
 uses as well as the duration of time each attempt runs for. It is
@@ -639,9 +640,9 @@ project by date, batch, or job by scanning at most 200 records making
 this query fast enough for a UI page.
 
 
-==================
+~~~~~~~~~~~~~~~~~~
 Job State Tracking
-==================
+~~~~~~~~~~~~~~~~~~
 
 To quickly be able to count the number of ready jobs, ready cores,
 running jobs, running cores, creating jobs, and creating cores for
@@ -652,9 +653,9 @@ the job state diagram. The updates to the ``user_inst_coll_resources``
 table happen in a trigger on the ``jobs`` table.
 
 
-============
+~~~~~~~~~~~~
 Cancellation
-============
+~~~~~~~~~~~~
 
 A user can trigger a cancellation of a batch via the cancel button in
 the UI or a REST request. The batch system also monitors how much has
@@ -693,9 +694,9 @@ Once a batch has been cancelled, no subsequent updates are allowed to
 the batch.
 
 
-============
+~~~~~~~~~~~~
 Known Issues
-============
+~~~~~~~~~~~~
 
 - The current database structure serializes MJC operations because the
   table ``batches_n_jobs_in_complete_states`` has one row per batch
@@ -709,6 +710,7 @@ Known Issues
   interweaved, the autoscaler and scheduler can deadlock.
 
 
+-----------------------------
 Proposed Change Specification
 -----------------------------
 
@@ -744,9 +746,9 @@ operations are performant:
 - Job Completion
 
 
-==================
+~~~~~~~~~~~~~~~~~~
 Job Group Creation
-==================
+~~~~~~~~~~~~~~~~~~
 
 A job group can be created with three different code paths. The first
 is to create an empty job group upfront and then the client explicitly
@@ -800,9 +802,9 @@ jobs to. Therefore, we will only implement the first interface for
 creating a job group and save the later interfaces for future work.
 
 
-==================
+~~~~~~~~~~~~~~~~~~
 Getting the Status
-==================
+~~~~~~~~~~~~~~~~~~
 
 Getting the status of a job group is a single HTTP request that
 executes an O(1) database query to do a small aggregation on the table
@@ -812,9 +814,9 @@ or the server needs to have a mechanism for translating a job group
 "name" into an ID to query for.
 
 
-============
+~~~~~~~~~~~~
 Cancellation
-============
+~~~~~~~~~~~~
 
 Cancelling the job group is a single HTTP request and an O(1) database
 insert operation. The job group ID is inserted into a table that
@@ -853,9 +855,9 @@ same job group so there is no change in behavior from what we
 currently do.
 
 
-==============
+~~~~~~~~~~~~~~
 Job Completion
-==============
+~~~~~~~~~~~~~~
 
 When a job is marked complete, all job groups the job is a member of
 are checked to see if the number of jobs in the job group is equal to
@@ -873,9 +875,9 @@ completed, we will delete the extra rows from the
 possible (O(n_active_batches)).
 
 
-===============
+~~~~~~~~~~~~~~~
 Job Group Trees
-===============
+~~~~~~~~~~~~~~~
 
 A job group tree consists of a tree structure where a job group can
 have children job groups where each child job group has a partition of
@@ -901,6 +903,7 @@ crucial for QoB functionality. Instead, it will provide a nicer user
 experience for both QoB and regular Hail Batch users.
 
 
+--------
 Examples
 --------
 
@@ -1037,7 +1040,7 @@ this will be a common use case and we can implement it **later** on:
     random_jg.update()
 
 
-
+-----------------------
 Effect and Interactions
 -----------------------
 
@@ -1057,6 +1060,7 @@ proposal is purely an addition to what we have in our system currently
 and maintains backwards compatibility.
 
 
+-------------------
 Costs and Drawbacks
 -------------------
 
@@ -1112,6 +1116,7 @@ tricky and confusing part of our system especially with how it relates
 to always_run jobs.
 
 
+------------
 Alternatives
 ------------
 
@@ -1156,7 +1161,7 @@ vision, but I want to make sure that if we commit to this approach
 that it does not impede the longer term vision I have outlined above.
 
 
-
+--------------------
 Unresolved Questions
 --------------------
 
