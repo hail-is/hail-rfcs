@@ -5,9 +5,9 @@ if [ -z "$SHELL" ]; then
 fi
 
 if [ ! -d _venv ]; then
-	python3 -m venv _venv
+	virtualenv _venv
 	. _venv/bin/activate
-	pip install -r ./requirements.txt
+	pip install sphinx
 	exec $SHELL
 else
 	. _venv/bin/activate
