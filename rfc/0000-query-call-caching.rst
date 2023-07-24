@@ -19,10 +19,10 @@ Hail Query Call Caching
 Motivation
 ==========
 `gnomAD <https://gnomad.broadinstitute.org/>`_ is one project that uses hail
-query for various analysis and quality-control pipelines which can cost in
-excess of [DURATION] and [DOLLARS] to compute.
-Evaluating a query reduces the results of many sub- queries with another to
-combine their results; a single failure in any of these will result in the whole
+for various analysis and quality-control pipelines which can cost in excess of
+[DURATION] and [DOLLARS] to compute.
+Evaluating a query involves executing a series of dependent parallel
+computations; a single failure in any of these will result in the whole
 query failing.
 These failures can happen for a multitude of reasons - from programmer error to
 general cloud instability.
@@ -31,7 +31,7 @@ Without an efficient means of re-trying queries and computational demand ever
 increasing, hail may become prohibitively expensive for such projects.
 
 To reduce the cost of re-tries, Hail experimented with the notion of "checkpoint
-files" when writing a :scala:`MatrixTable` to persistent storage.
+files" when writing a :scala:`MatrixTable` to persistent storage.:sup:`1`
 A "checkpoint file" was a user-defined location where Hail accumulated metadata
 about the partitions it had already computed and written.
 Then, if a failure happened and the query was re-run, Hail would use these
@@ -43,7 +43,7 @@ changing the meaning of the query.
 There were a number of problems this design, including
 
 * it only applied to writing :scala:`MatrixTable` and was not generalised to
-  other kinds of hail expression (such as accumulations) or data types.
+  other kinds of hail expression (such as accumulations) on data types.
 * the user was required to keep track of these staging files and guarantee that
   the :scala:`MatrixTable` contained therein was the same as that used in the
   query.
@@ -55,6 +55,9 @@ As part of Hail's continued effort to implement query execution on Hail batch,
 experimental feature for simplicity, presenting the opportunity to improve upon
 checkpoint files.
 We thus needs a means of resuming execution from where the last query left off.
+
+:sup:`1` Not to be used with the `checkpoint` operation that writes then reads
+an intermediate :scala:`Table`/:scala:`MatrixTable` computation to storage.
 
 Proposed Change Specification
 =============================
@@ -103,7 +106,7 @@ operation:
 Semantic Hashing
 ----------------
 To lookup operations in the cache, we need a way of producing an identifier
-that uniquely represents the value produced by an *activation*.
+that uniquely represents a particular *activation*.
 We do this by defining a *semantic hash* for the activation, comprised of:
 
 a) a *static* component computed from the :scala:`IR` that generated the
@@ -126,7 +129,13 @@ Execution Cache
 Users will "bring their own"\ :sup:`TM` cache directory where cached
 computations will be stored.
 This cache dir will be an prefix in local or cloud storage.
-The driver will store cache files named ``{cachedir}/{hail-version}/{semhash}``.
+The driver will store cache files named ``{cachedir}/{semhash}``, where
+
+- `cachdir` is a user-defined location, defaulting to
+  `{tmp}/hail/{hail-pip-version}`
+- `tmp` is either the local tempdir for spark and local backends, or the
+  remote  tempdir for `QoB`.
+
 These files will contain accumulated activation results, indexed by their
 partition number.
 
@@ -149,7 +158,7 @@ client:
 
 ..  code-block:: python
 
-    >> hl._set_flags(use_fast_restarts=True)
+    >> hl._set_flags(use_fast_restarts='1')
     >> hl._set_flags(cachedir='gs://my-bucket/cache/0')
 
 
@@ -158,7 +167,7 @@ command line prior to starting their python session:
 
 ..  code-block:: sh
 
-    > HAIL_USE_FAST_RESTARTS=1 HAIL_CACHE_DIR='gs://my-bucket/object-prefix' ipython
+    >> HAIL_USE_FAST_RESTARTS=1 HAIL_CACHE_DIR='gs://my-bucket/cache/0' ipython
 
 Notes:
 
@@ -169,6 +178,8 @@ Notes:
 
 Effect and Interactions
 =======================
+
+
 Your proposed change addresses the issues raised in the motivation. Explain how.
 
 Also, discuss possibly contentious interactions with existing language or compiler
@@ -183,12 +194,24 @@ Costs and Drawbacks
 .. drawbacks that cannot be resolved.
 
 * Only cache around :scala:`CollectDistributedArray`
-* Caching requires overhead from lookups and insertions
-* Not completely hidden from user - requires much diligent error handling
-* Requires that we start from the beginning until we get a cache-miss.
+* Computing the semantic hash is a little tricky
 
-  * A more efficient fast-restart mechanism might search for the first
-    cache-hit from the end of the query.
+  - Randomisation in queries will change the semantic hash, despite no changes
+    in semantics
+  - Such queries will not likely benefit from call-caching
+  - eg. writing checkpoint files via the :code:`checkpoint()` operation
+
+* Caching requires overhead from lookups and insertions
+* Not completely hidden from user
+
+  - writing state in a user-defined location exposes opportunities for failures
+  - requires diligent error handling
+
+* Requires that we start from the beginning until we get a cache-miss in a
+  bottom-up execution strategy.
+
+  - A more efficient fast-restart mechanism might search for the first
+    cache-hit from the end of the query in a top-down execution strategy.
 
 Alternatives
 ============
@@ -216,22 +239,253 @@ Execution Cache
 
 * How long should the cache live?
 
-Presumably as long as tmpdir as the files it caches reside in tmpdir
+  - Presumably as long as tmpdir as the files it caches reside in tmpdir.
+  - Users can configure this by setting a lifetime policy on their bucket.
 
-* Where do we write
+* Where do we write?
 
-Configurable and user defined. We'll likely default to the tempdir unless
-a user specifies otherwise.
+  - Configurable and user defined.
+  - We'll likely default to the tempdir unless a user specifies otherwise.
 
 
 * Who do we handle multiple processes executing the same query?
+
   - atomic writes, via db or file re-writes
   - one wins, doesn't matter which
-* Should users "bring-their-own"\ :sup:`TM` cache?
 
+
+Implementation Plan
+===================
+
+The reader should note that implementation examples below are for illustrative
+purposes only and that the real implementation may differ slightly.
+
+Semantic Hashes
+---------------
+
+Computing Static Component
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+We can compute the static component of a semantic hash for the :code:`IR` in
+a level-order traversal of the nodes in the :code:`IR`.
+Node that the actual order doesn't matter, just that an order is defined.
+
+Since the ``IR`` contains references and compiler-generated names, we need to
+normalise the names in the :code:`IR` (see :scala:`NormalizeNames.scala`)
+to get consistent hashes.
+
+The semantic hash is defined for the whole :code:`IR` (as apposed to prefixes
+of the :code:`IR` tree, see Alternatives below).
+Thus, we'll compute the hash as early as possible to minimise the computational
+cost as the :scala:`IR` gets lowered and expanded.
+This also reduces the number of :code:`BaseIR` operations we need to define
+semantic hashes for (ie. only those that can be constructed in python).
+
+
+..  code-block:: scala
+
+    object LevelOrder {
+      def apply(root: BaseIR): Iterator[BaseIR]
+    }
+
+Then, assuming we have an appropriate hashing algorithm, seed and a way of
+combining hashes:
+
+..  code-block:: scala
+
+    @newtype case class Hash(v: ???) extends AnyRef {
+      def <>(b: Hash): Hash
+    }
+
+    val seed: Hash = ???
+    def hash(a: Any): Hash = ???
+
+
+Then:
+
+..  code-block:: scala
+
+    object SemanticHash {
+      def apply(fs: FS, root: BaseIR): Option[Hash] =
+        LevelOrder(NormalizeNames(root)).foldLeft(seed) { (s, ir) =>
+          s <> ir match {
+            case Ref(name, _) =>
+              hash(classOf[Ref]) <> hash(name)
+
+            case TableRead(_, _, reader) =>
+              hash(classOf[TableRead]) <> reader
+                .pathsUsed
+                .map(fs.etag)
+                .foldLeft(hash(reader.getClass))(_ <> hash(_))
+
+            case ir if DependsOnlyOnInputs(ir) =>
+              Hash(ir.getClass)
+
+            case _ if DontKnowHowToDefineSemhash(ir) =>
+               return None
+
+            case ... =>
+          }
+        }
+    }
+
+Observations:
+
+- For all :code:`IR` nodes that depend only on their children and have no
+  additional parameterisation, their semantic hash is simply some unique
+  encoding for what that node means.
+- Hashing :code:`IR`'s class is sufficient
+- Note that the node's children will be hashed in the traversal
+- There are times when we can't define a semantic hash (such as reading a
+  table from a RVD). In these cases, we'll just return :scala:`None`.
+
+
+Computing Dynamic Component
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The query driver is a single-threaded system that compiles and executes the
+same queries in a repeatable way.
+That is, if a query generates one or more :code:`CDA` nodes, those nodes will be
+emitted in the same order.
+This, we can use the static component in the same way as random number
+generator state:
+
+- When a :scala:`CDA` node is emitted, we can fork the semhash key-value
+- We "mix" one value with the :code:`CDA`'s dynamic id to generate the semantic
+  hash for that particular activation
+- and update the static component state with the forked value for the next
+  :code:`CDA` node.
+
+To do this, we can add the function :code:`nextHash` to the
+:code:`ExecuteContext` that returns a new `Hash` value to be mixed with the
+dynamic component and updates internal state:
+
+..  code-block:: scala
+
+    final case class IrMetadata(semhash: Option[Hash]) {
+        private[this] var counter: Int = 0
+
+        def nextHash: Option[Hash] = {
+           val n = hash(counter)
+           counter += 1
+           semhash.map(_ <> n)
+        }
+    }
+
+Then, in :scala:`Emit.scala`:
+
+..  code-block:: scala
+
+    case cda: CollectDistributedArray =>
+      ...
+      semhash <- cb.newLocal("semhash")
+      emitI(dynamicID).consume(cb,
+        (),
+        nextHash.foreach { hash =>
+          cb.assign(semhash, hash)
+        },
+        { dynamicID =>
+            nextHash.foreach { staticHash =>
+              val dynamicHash =
+                Code.invokeScalaObject[Hash](
+                  Hash.getClass,
+                  "apply",
+                  Array(classOf[String]),
+                  Array(dynamicID.loadString(cb))
+                )
+
+              val combined =
+                Code.invokeScalaObject[Hash](
+                  Hash.getClass,
+                  "<>",
+                  Array.fill(2)(classOf[Hash]),
+                  Array(staticHash, dynamicHash)
+                )
+
+              cb.assign(semhash, combined)
+            }
+        }
+      )
+
+      // call `collectDArray` with semhash
+
+Using :code:`Option` allows us to encode if we can compute a semantic hash
+for the given :code:`IR`.
+In the case when one cannot be computed, :code:`collectDArray` simply skips
+reading and updating a cache.
+
+
+Alternatives
+^^^^^^^^^^^^
+
+The following describes a means of computing and assigning the static portion of
+semantic hashes for each node in the :code:`IR`.
+The aim was to support extending queries that were developed incrementally and
+interactively by recognising and caching query prefixes.
+When the compiler sees a prefix of the query that it had already computed, it
+would simply load the result from the cache rather than recompute.
+In reality this is very hard to do as :code:`PruneDeadFields` changes the
+semantics of the :code:`IR`, meaning the what's computed depends on how the
+result is used.
+
+We can compute the static component of a semantic hash from a bottom-up
+traversal of the IR ``IR``.
+Since the ``IR`` supports references, we need to compute a binding environment
+top-down that maps names to their definitions, so we can look up the static
+component of the value being referenced:
+
+..  code-block:: scala
+
+    type BindingEnv = Map[String, BaseIR]
+
+    object FlattenTopDown {
+      def apply(ir: BaseIR, env: BindingEnv): Iterator[(BaseIR, BindingEnv)] =
+        ir match {
+          case Let(name, value, body) =>
+            FlattenTopDown(value, env) ++
+            FlattenTopDown(body, env.put(name, value)) ++
+            Iterator.single(ir, env)
+
+          case ... =>
+        }
+    }
+
+Then, assuming we have an appropriate hashing algorithm and a way of combining
+hashes:
+
+..  code-block:: scala
+
+    def hash(a: Any): Hash = ???
+    @newtype case class Hash(v: ???) {
+      def <>(b: Hash): Hash = ???
+    }
+
+Then:
+
+..  code-block:: scala
+
+    object BottomUp {
+      def apply(fs: FS, memo: Memo[Hash])(ir: BaseIR, env: BindingEnv): Hash =
+        ir match {
+          case Ref(name, _) =>
+            hash(classOf[Ref]) <> memo(env(name))
+
+          case TableRead(_, _, reader) =>
+            reader
+              .pathsUsed
+              .map(fs.digest)
+              .foldLeft(hash(classOf[TableRead]))(_ <> hash(_))
+
+          case ir if DependsOnlyOnInputs(ir) =>
+            ir.children.foldLeft(hash(ir.getClass))(_ <> memo(_))
+
+          case ... =>
+        }
+    }
 
 How to eliminate the effects of compiler-generated names?
----------------------------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 The compiler generates names for struct fields.
 Thus, semantic hashes of struct expressions that use compiler-generated names in
 the computation for the hash will not hash to the same value.
@@ -300,81 +554,6 @@ Now, in our :scala:`StreamMap` example above, we cannot map
 Now, our :scala:`StreamMap` example will never execute. Is semantic hashing
 meant to detect this and eliminate such expressions?
 
-Implementation Plan
-===================
-
-The reader should note that implementation examples below are for illustrative
-purposes only and that the real implementation may differ.
-
-Semantic Hashes
----------------
-
-Computing Static Component
-^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-We can compute the static component of a semantic hash from a bottom-up
-traversal of the IR ``IR``.
-Since the ``IR`` supports references, we need to compute a binding environment
-top-down that maps names to their definitions, so we can look up the static
-component of the value being referenced:
-
-..  code-block:: scala
-
-    type BindingEnv = Map[String, BaseIR]
-
-    object FlattenTopDown {
-      def apply(ir: BaseIR, env: BindingEnv): Iterator[(BaseIR, BindingEnv)] =
-        ir match {
-          case Let(name, value, body) =>
-            FlattenTopDown(value, env) ++
-            FlattenTopDown(body, env.put(name, value)) ++
-            Iterator.single(ir, env)
-
-          case ... =>
-        }
-    }
-
-Then, assuming we have an appropriate hashing algorithm and a way of combining
-hashes:
-
-..  code-block:: scala
-
-    def hash(a: Any): Hash = ???
-    @newtype case class Hash(v: ???) {
-      def <>(b: Hash): Hash = ???
-    }
-
-Then:
-
-..  code-block:: scala
-
-    object BottomUp {
-      def apply(fs: FS, memo: Memo[Hash])(ir: BaseIR, env: BindingEnv): Hash =
-        ir match {
-          case Ref(name, _) =>
-            hash(classOf[Ref]) <> memo(env(name))
-
-          case TableRead(_, _, reader) =>
-            reader
-              .pathsUsed
-              .map(fs.digest)
-              .foldLeft(hash(classOf[TableRead]))(_ <> hash(_))
-
-          case ir if DependsOnlyOnInputs(ir) =>
-            ir.children.foldLeft(hash(ir.getClass))(_ <> memo(_))
-
-          case ... =>
-        }
-    }
-
-Computing Dynamic Component
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-In ``Emit.scala``, pass down the memoized static components of the semantic
-hash.
-When emitting :scala:`CollectDistributedArray`, combine the dynamic id with the
-static component of the hash and pass that to :scala:`collectDArray`.
-
 
 Execution Cache
 ---------------
@@ -384,13 +563,14 @@ Given an interface for an :scala:`ExecutionCache`` of the form:
 ..  code-block:: scala
 
     trait ExecutionCache {
-        def lookup(h: SemanticHash): Array[(Int, Array[Byte])]
-        def put(h: SemanticHash, res: Array[(Int, Array[Byte])]): Unit
+      def lookup(h: SemanticHash): Array[(Int, Array[Byte])]
+      def put(h: SemanticHash, res: Array[(Int, Array[Byte])]): Unit
     }
 
 We can implement a file-system cache that uses a file prefix plus the current
 version of Hail to generate a "root" directory, under which all cache files are
 stored by their semantic hash.
+
 An implementation might look as follows:
 
 ..  code-block:: scala
@@ -399,16 +579,27 @@ An implementation might look as follows:
       extends ExecutionCache {
 
       override def lookup(h: SemanticHash): Array[(Int, Array[Byte])] =
-        Using(fs.open(s"$cachedir/${HailContext.version}/$h")) { readlines }
+        Using(fs.open(s"$cachedir/$h")) { _.split(newline).map(CacheLine.read) }
           .getOrElse(Array.empty)
 
       override def put(h: SemanticHash, res: Array[(Int, Array[Byte])]): Unit =
         fs.write(s"$cachedir/${HailContext.version}/$h") { ostream =>
-          res.foreach { case (index, bytes) =>
-            ostream.write(index)
-            ostream.write(", ")
-            ostream.write(bytes)
-            ostream.write("\n")
+          res.foreach { CacheLine.write(ostream) }
+        }
+
+        object CacheLine {
+          def write(ostream: OutputStream): (Int, Array[Byte]) => Unit = {
+            case (index, data) =>
+              ostream.write(index)
+              ostream.write(", ")
+              ostream.write(Base64Encode(data))
+              ostream.write(newline)
+          }
+
+          def read(s: String): (Int, Array[Byte]) = {
+            val (index, s) = readInt(s)
+            val (_, s) = readString(s, ", ")
+            CacheLine(index, Base64Decode(s.getBytes))
           }
         }
     }
@@ -419,9 +610,7 @@ For testing, we can simply create a wrapper around a :scala:`mutable.HashMap`:
 
     @newtype case class MemExecutionCache(
         m: mutable.HashMap[SemanticHash, Array[(Int, Array[Byte])]]
-    ) extends ExecutionCache {
-        ...
-    }
+    ) extends ExecutionCache { ... }
 
 Endorsements
 =============
