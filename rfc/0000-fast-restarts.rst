@@ -1,6 +1,6 @@
-=======================
-Hail Query Call Caching
-=======================
+================================
+Fast Restarts for Failed Queries
+================================
 
 .. author:: Edmund Higham <edhigham@gmail.com>
 .. date-accepted:: Leave blank. This will be filled in when the proposal is accepted.
@@ -18,9 +18,6 @@ Hail Query Call Caching
 
 Motivation
 ==========
-`gnomAD <https://gnomad.broadinstitute.org/>`_ is one project that uses hail
-for various analysis and quality-control pipelines which can cost in excess of
-[DURATION] and [DOLLARS] to compute.
 Evaluating a query involves executing a series of dependent parallel
 computations; a single failure in any of these will result in the whole
 query failing.
@@ -212,24 +209,6 @@ Costs and Drawbacks
 
   - A more efficient fast-restart mechanism might search for the first
     cache-hit from the end of the query in a top-down execution strategy.
-
-Alternatives
-============
-
-.. List alternative designs to your proposed change. Both existing
-.. workarounds, or alternative choices for the changes. Explain
-.. the reasons for choosing the proposed change over these alternative:
-.. *e.g.* they can be cheaper but insufficient, or better but too
-.. expensive. Or something else.
-
-.. The PR discussion often raises other potential designs, and they should be
-.. added to this section. Similarly, if the proposed change
-.. specification changes significantly, the old one should be listed in
-.. this section.
-
-* Adopt a graph-reduction execution model?
-* Using a key-value store + persistent storage for a cache to reduce lookup
-  latency
 
 Unresolved Questions
 ====================
