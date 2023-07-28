@@ -268,7 +268,17 @@ Computing Static Component
 
 We can compute the static component of a semantic hash for the :code:`IR` in
 a level-order traversal of the nodes in the :code:`IR`.
-Node that the actual order doesn't matter, just that an order is defined.
+The particular ordering itself doesn't matter, only that an ordering is defined.
+We also need to keep track of :code:`IR` shape when traversing;
+it's possible to define two :code:`IR` trees with different shape but look
+identical when flattened to a list.
+We'll include an encoding of the node's trace (the path from the root node) to
+account for this.
+
+..  code-block:: scala
+
+    def levelOrder(node: BaseIR): Iterator[(BaseIR, Trace)]
+
 
 Since the ``IR`` contains references and compiler-generated names, we need to
 normalise the names in the :code:`IR` (see :scala:`NormalizeNames.scala`)
@@ -281,53 +291,70 @@ cost as the :scala:`IR` gets lowered and expanded.
 This also reduces the number of :code:`BaseIR` operations we need to define
 semantic hashes for (ie. only those that can be constructed in python).
 
+Generally, a hash function takes a seed and some data (typically a stream of
+numbers or bytes) and produces a hash.
+That hash can be extended with more data by feeding it back to the hash function
+as the seed.
+What's needed is a way to encode the :code:`IR` as a byte stream.
+A simple :code:`toString` is not sufficient as some nodes read data from
+external blob-storage;
+we need to ensure that the data hasn't changed since we last ran the query.
+Furthermore, we can't define an encoding for some :code:`IR` nodes, so we need
+a way to bail out:
+
 
 ..  code-block:: scala
 
-    object LevelOrder {
-      def apply(root: BaseIR): Iterator[BaseIR]
+    def encode(fs: FS, ir: BaseIR, trace: Trace): Option[Array[Byte]] = {
+      val buffer =
+        Array.newBuilder[Byte] ++= encodeTrace(trace)
+
+      ir match {
+        case Ref(name, _) =>
+          buffer ++=
+            encodeClass(classOf[Ref]) ++=
+            name.getBytes
+
+        case TableRead(_, _, reader) =>
+          buffer ++=
+            encodeClass(classOf[TableRead]) ++=
+            encodeClass(reader.getClass)
+
+          reader.pathsUsed.foreach { p =>
+            // encode the contents of the file (md5 digest, etag, other)
+            // to ensure it hasn't been modified since last time the query
+            // was ran (if ever).
+            buffer ++= encodeFile(fs, p)
+          }
+
+        case ir if DependsOnlyOnInputs(ir) =>
+          buffer ++= encodeClass(ir.getClass)
+
+        case _ if DontKnowHowToDefineSemhash(ir) =>
+          return None
+
+        case ... =>
+      }
+
+      Some(buffer)
     }
+
 
 Then, assuming we have an appropriate hashing algorithm, seed and a way of
-combining hashes:
+combining hashes, we can create and extend the hash with the contribution of
+each node:
 
 ..  code-block:: scala
 
-    @newtype case class Hash(v: ???) extends AnyRef {
-      def <>(b: Hash): Hash
+    var hash = Algorithm.SEED
+    for ((node, trace) <- levelOrder(nameNormalizedIr)) {
+      encode(fs, node, trace) match {
+        case Some(bytes) => hash = Algorithm.extend(hash, bytes)
+        case _           => return None
+      }
     }
+    Some(hash)
 
-    val seed: Hash = ???
-    def hash(a: Any): Hash = ???
-
-
-Then:
-
-..  code-block:: scala
-
-    object SemanticHash {
-      def apply(fs: FS, root: BaseIR): Option[Hash] =
-        LevelOrder(NormalizeNames(root)).foldLeft(seed) { (s, ir) =>
-          s <> ir match {
-            case Ref(name, _) =>
-              hash(classOf[Ref]) <> hash(name)
-
-            case TableRead(_, _, reader) =>
-              hash(classOf[TableRead]) <> reader
-                .pathsUsed
-                .map(fs.etag)
-                .foldLeft(hash(reader.getClass))(_ <> hash(_))
-
-            case ir if DependsOnlyOnInputs(ir) =>
-              Hash(ir.getClass)
-
-            case _ if DontKnowHowToDefineSemhash(ir) =>
-               return None
-
-            case ... =>
-          }
-        }
-    }
 
 Observations:
 
@@ -362,14 +389,14 @@ dynamic component and updates internal state:
 
 ..  code-block:: scala
 
-    final case class IrMetadata(semhash: Option[Hash]) {
-        private[this] var counter: Int = 0
+    final case class IrMetadata(semhash: Option[Int]) {
+      private[this] var counter: Int = 0
 
-        def nextHash: Option[Hash] = {
-           val n = hash(counter)
-           counter += 1
-           semhash.map(_ <> n)
-        }
+      def nextHash: Option[Int] = {
+        val bytes = intToBytes(counter)
+        counter += 1
+        semhash.map(Algorithm.extend(_, bytes))
+      }
     }
 
 Then, in :scala:`Emit.scala`:
@@ -378,32 +405,31 @@ Then, in :scala:`Emit.scala`:
 
     case cda: CollectDistributedArray =>
       ...
-      semhash <- cb.newLocal("semhash")
-      emitI(dynamicID).consume(cb,
-        (),
-        nextHash.foreach { hash =>
-          cb.assign(semhash, hash)
+      semhash <- newLocal[Integer]("semhash")
+      emitI(dynamicID).consume(
+        ifMissing = nextHash.foreach { hash =>
+          assign(semhash, boxToInteger(hash))
         },
-        { dynamicID =>
-            nextHash.foreach { staticHash =>
-              val dynamicHash =
-                Code.invokeScalaObject[Hash](
-                  Hash.getClass,
-                  "apply",
-                  Array(classOf[String]),
-                  Array(dynamicID.loadString(cb))
-                )
+        ifPresent = { dynamicID =>
+          nextHash.foreach { staticHash =>
+            val dynamicHash =
+              invokeScalaObject(
+                String.getClass,
+                "getBytes",
+                Array(classOf[String]),
+                Array(dynamicID.loadString(cb))
+              )
 
-              val combined =
-                Code.invokeScalaObject[Hash](
-                  Hash.getClass,
-                  "<>",
-                  Array.fill(2)(classOf[Hash]),
-                  Array(staticHash, dynamicHash)
-                )
+            val combined =
+              invokeScalaObject(
+                Algorithm.getClass,
+                "extend",
+                Array(classOf[Int], classOf[Array[Byte]]),
+                Array(staticHash, dynamicHash)
+              )
 
-              cb.assign(semhash, combined)
-            }
+            assign(semhash, boxToInteger(combined))
+          }
         }
       )
 
@@ -422,6 +448,7 @@ The following describes a means of computing and assigning the static portion of
 semantic hashes for each node in the :code:`IR`.
 The aim was to support extending queries that were developed incrementally and
 interactively by recognising and caching query prefixes.
+It does not work.
 When the compiler sees a prefix of the query that it had already computed, it
 would simply load the result from the cache rather than recompute.
 In reality this is very hard to do as :code:`PruneDeadFields` changes the
@@ -451,7 +478,7 @@ component of the value being referenced:
     }
 
 Then, assuming we have an appropriate hashing algorithm and a way of combining
-hashes:
+a tree of hashes:
 
 ..  code-block:: scala
 
@@ -482,6 +509,9 @@ Then:
           case ... =>
         }
     }
+
+The binary combination of hashes makes it very hard to reason about the
+likelihood of collisions.
 
 How to eliminate the effects of compiler-generated names?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
