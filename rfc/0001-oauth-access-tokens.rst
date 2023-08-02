@@ -340,13 +340,3 @@ a login flow when the credential expires or is revoked.
 It is also unclear whether there is any way to somehow restrict the audience of
 service account access tokens in Google as you can in Azure. I think this is a minor
 concern as the tokens we'll generate for Hail auth will be strictly scoped.
-
-
-Endorsements
--------------
-(Optional) This section provides an opportunity for any third parties to express their
-support for the proposal, and to say why they would like to see it adopted.
-It is not mandatory for have any endorsements at all, but the more substantial
-the proposal is, the more desirable it is to offer evidence that there is
-significant demand from the community.  This section is one way to provide
-such evidence.
