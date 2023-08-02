@@ -3,18 +3,13 @@ OAuth 2.0 Authorization in the Hail Service
 ==============
 
 .. author:: Daniel Goldstein
-.. date-accepted:: Leave blank. This will be filled in when the proposal is accepted.
-.. ticket-url:: Leave blank. This will eventually be filled with the
-                ticket URL which will track the progress of the
-                implementation of the feature.
+.. date-accepted:: 2023/08/02
 .. implemented:: Leave blank. This will be filled in with the first Hail version which
                  implements the described feature.
-.. header:: This proposal is `discussed at this pull request <https://github.com/hail-is/hail-rfc/pull/0>`_.
-            **After creating the pull request, edit this file again, update the
-            number in the link, and delete this bold sentence.**
+.. header:: This proposal is `discussed at this pull request <https://github.com/hail-is/hail-rfc/pull/2>`_.
 .. sectnum::
 .. contents::
-.. role:: python(code)
+.. role:: Python(code)
 
 Motivation
 ==========
@@ -25,7 +20,7 @@ authorize programmatic access to the Hail API.
 The Hail Service authenticates users using the OAuth2 protocol, relying on either
 GCP IAM or Azure AD as the identity providers. However, while the Hail Service
 relies on these identity providers for authentication, it currently does *not* use them
-to authorize access to Hail APIs. The Hail ``auth`` service acts as an Authorization
+to authorize access to Hail APIs. The Hail ``auth`` service acts as an Authentication
 Server for the Hail API, minting long-lived tokens after the OAuth2 flow that are persisted
 on user machines. Minting our own tokens imposes a maintenance and security burden
 on the Hail team and any operators of a Hail Service.
@@ -70,7 +65,7 @@ is valuable to ensure that we are using them properly.
 We'll consider four primary entities in an OAuth2 interaction:
 
 - The user/identity
-- The client (e.g. the Hail python library)
+- The client (e.g. the Hail Python library)
 - The Authorization Server (Google IAM or AAD)
 - The API/Resource Server (the Hail service)
 
@@ -117,7 +112,7 @@ for other systems cannot be replayed against this Resource Server.
 
 Unfortunately Google and Azure have slightly different approaches to this interaction.
 Both scenarios will involve installing an OAuth2 client credential on the user's machine
-to be used by the Hail python library, and they will involve similar changes to the ``auth``
+to be used by the Hail Python library, and they will involve similar changes to the ``auth``
 service. However, their implementations vary slightly when it comes to the audience
 claim, so the process to obtain access tokens will look slightly different.
 The following sections detail how that process would work with those two identity providers.
@@ -131,14 +126,14 @@ claim is always set to the unique ID of the client. On a user's machine, ``aud``
 would be the client ID of the OAuth2 Client used to obtain that credential. For
 service accounts, it would be the unique ID of the service account in IAM. Note
 that in the service account case ``aud == sub``, but not in the case of the Hail
-python library acting on behalf of a user.
+Python library acting on behalf of a user.
 
 I find this unintuitive, but I suppose this can be interpreted as "the intended
 recipient of this token is the application that requested it, and Resource Servers
 should maintain a list of trusted applications".
 
 Thus, when the ``auth`` service validates an access token, it must assert that
-the ``aud`` claim is *either* the Client ID for the python library OAuth2 Client
+the ``aud`` claim is *either* the Client ID for the Python library OAuth2 Client
 or the unique ID of a Hail-owned service account in the system. Doing so protects
 against client applications that we don't control impersonating human users to our
 system.
@@ -175,7 +170,7 @@ service without making a network request.
 User Machine Configuration Changes
 ----------------------------------
 
-If we remove Hail-minted tokens, the Hail python client needs a mechanism
+If we remove Hail-minted tokens, the Hail Python client needs a mechanism
 for requesting access tokens on behalf of the user. The way to do this is to have
 a Desktop OAuth2 client credential that lives on the user's machine that administers
 the OAuth2 flow and is later used to request tokens.
@@ -264,7 +259,7 @@ keep the OAuth2 client actually secret. However, this does not exist in the worl
 Desktop applications, as client secrets stored on user devices *cannot be considered secret*.
 In order to preserve the integrity of the web-based login, it is best to maintain a separate
 OAuth2 client that is issued specifically for desktop applications. There is also an intuitive
-argument for why we should generate two OAuth clients, as the Hail python library and the Hail
+argument for why we should generate two OAuth clients, as the Hail Python library and the Hail
 web service are two distinct applications, and we could in the future want different scopes
 in those two environments.
 
@@ -296,7 +291,7 @@ For Hail-audience client secret:
 - An attacker can just as easily access the client secret as they can the Hail tokens.
   The attacker can then generate access tokens if the user has previously logged in
   and the refresh token is still valid.
-- The audience claim of these access tokens will be the Hail python package, so these
+- The audience claim of these access tokens will be the Hail Python package, so these
   tokens can only be used against the Hail Service.
 - Unlike the Hail-minted tokens, the Bearer token in the requests are short-lived
   access tokens. So any access tokens that might be leaked are unlikely to pose
