@@ -3,7 +3,9 @@ Notes on reStructuredText - delete this section before submitting
 
 The proposals are submitted in reStructuredText format.
 To get inline code, enclose text in double backticks, ``like this``, or include
-inline syntax highlighting [scala]`like this`.
+inline syntax highlighting :scala:`"like this"`. For the latter, if you are
+using a language that hasn't yet been used elsewhere in the RFCs, you'll need to
+add a ``role`` to the ``rst_prolog`` variable in ``conf.py``.
 To get block code, use a double colon and indent by at least one space
 
 ::
