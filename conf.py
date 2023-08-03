@@ -68,6 +68,41 @@ exclude_patterns = [u'_build', 'Thumbs.db', '.DS_Store', "rfc/0000-template.rst"
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
 
+# Prepended to all .rst files when rendering them.
+rst_prolog = """
+.. role:: python(code)
+   :language: python
+   :class: highlight
+
+.. role:: scala(code)
+   :language: scala
+   :class: highlight
+
+.. role:: c(code)
+   :language: cpp
+   :class: highlight
+
+.. role:: cpp(code)
+   :language: cpp
+   :class: highlight
+
+.. role:: html(code)
+   :language: html
+   :class: highlight
+
+.. role:: css(code)
+   :language: css
+   :class: highlight
+
+.. role:: scss(code)
+   :language: scss
+   :class: highlight
+
+.. role:: javascript(code)
+   :language: javascript
+   :class: highlight
+
+"""
 
 # -- Options for HTML output -------------------------------------------------
 
