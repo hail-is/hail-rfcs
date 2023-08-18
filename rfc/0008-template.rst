@@ -88,7 +88,7 @@ We propose these modest modifcations to the `import_vcf` signature:
 1. Mark ``array_elements_required`` as deprecated.
 
 2. Add ``disambiguate_single_dot: Dict[str, Callable[[Expression], Expression]]`` which, for each
-   FORMAT field f, accepts a row at which field f was "." and returns a value for field f. The value
+   INFO field f, accepts a row at which field f was "." and returns a value for field f. The value
    of other fields with a "." in this row is unspecified.
 
 And the following changes of semantics:
