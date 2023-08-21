@@ -83,20 +83,21 @@ The A case might be fairly common. We'll need a way for the user to specify how 
 The "Number=." case is probably the most common ambiguous case. Again, the user will need to specify
 how to interpret that.
 
-We propose these modest modifcations to the `import_vcf` signature:
+We propose these modest modifcations to the ``import_vcf`` signature:
 
 1. Mark ``array_elements_required`` as deprecated.
 
-2. Add ``disambiguate_single_dot: Dict[str, Callable[[Expression], Expression]]`` which, for each
-   INFO field f, accepts a row at which field f was "." and returns a value for field f. The value
-   of other fields with a "." in this row is unspecified.
+2. Add ``disambiguate_single_dot: Dict[str, Callable[[Expression], Expression]]``. For each row in
+   the VCF, for each INFO field ``f`` with an ambiguous field value, ``import_vcf`` calls
+   ``disambiguate_single_dot(f)`` and passes the row as the argument. All the ambiguous fields have
+   the missing value. See the first example below.
 
 And the following changes of semantics:
 
 1. For each unambiguous case, parse a comma-separated list of values as an array of possibly missing
    values. This currently raises an error. For example, ".,." and "3,." are now parsed as
-   `hl.array(hl.missing(...), hl.missing(...))` and `hl.array(3, hl.missing(...))`. They previously
-   raised an error.
+   ``hl.array(hl.missing(...), hl.missing(...))`` and ``hl.array(3, hl.missing(...))``. They
+   previously raised an error.
 
 2. For each unambigious array case, parse a "." as a missing value of type array.
 
@@ -110,6 +111,27 @@ And the following changes of semantics:
 
 Examples
 --------
+
+Assume that ``FOO``, ``BAR``, ``BAZ``, and ``QUX`` are all have ``Type=Integer`` and
+``Number=.``. Consider parsing the following VCF line:
+
+::
+
+    chr1   1 .   A   T  .   . FOO=3;BAR=.;BAZ=.,.;QUX=.    GT:AD:GQ:RGQ
+
+The ``BAR`` and ``QUX`` fields are ambiguous. For both ``BAR`` and ``QUX``, we evaluate their
+``disambiguate_single_dot`` expression on the following row:
+
+::
+
+    hl.Struct(
+        FOO=3,
+	BAR=hl.missing(hl.tint32),
+	BAZ=[hl.missing(hl.tint32), hl.missing(hl.tint32)],
+	QUX=hl.missing(hl.tint32),
+    )
+
+The resulting value for each field replaces its currently missing value.
 
 After this change, this VCF (reported by James Nemesh in Zulip):
 
