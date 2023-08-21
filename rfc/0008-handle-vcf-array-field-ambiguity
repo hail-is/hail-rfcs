@@ -1,11 +1,11 @@
-==============================
-Extra Structure Within a Batch
-==============================
+================================
+Handle VCF Array Field Ambiguity
+================================
 
 .. author:: Dan King
-.. date-accepted::
+.. date-accepted:: 2023-08-21
 .. ticket-url::
-.. implemented::
+.. implemented:: https://github.com/hail-is/hail/pull/13465
 .. header:: This proposal is `discussed at this pull request <https://github.com/hail-is/hail-rfcs/pull/8>`_.
 .. sectnum::
 .. contents::
