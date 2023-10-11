@@ -222,7 +222,7 @@ time_created, and time_completed. The `job_group_parents` table stores
 the parent child relationships between job groups densely as an
 ancestors table. The following tables will now be parameterized by
 both (batch_id, job_group_id) instead of (batch_id) with the default
-value for job_group_id being 1, which is the root job group:
+value for job_group_id being 0, which is the root job group:
 
 - `batches_cancelled`
 - `aggregated_batch_resources_v2`
@@ -230,6 +230,19 @@ value for job_group_id being 1, which is the root job group:
 - `batch_attributes`
 - `batches_n_jobs_in_complete_states`
 
+The following are the primary keys for key Batch concepts. Note that the
+primary key for a job has not changed and is not parameterized by the job
+group ID.
+
+- batch: (`id`)
+- job: (`batch_id`, `job_id`)
+- job_group: (`batch_id`, `job_group_id`)
+
+In addition, note that the `batch_updates` table is not parameterized
+by a job group id because an update is a separate concept and an
+update can contain jobs from multiple job groups. The update is just
+the staged "transaction" of changes to be made to the batch rather
+than the job organization.
 
 The front end will need the following new REST endpoints:
 
