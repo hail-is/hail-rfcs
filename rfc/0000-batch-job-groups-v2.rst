@@ -216,9 +216,9 @@ here, the underlying job groups structure proposed can easily be used
 to address the UI issues described in the Motivation section.
 
 More concretely, we will create two new tables: `job_groups` and
-`job_group_parents`. The `job_groups` table stores information about
+`job_group_self_and_ancestors`. The `job_groups` table stores information about
 the job group such as the n_jobs, callback, cancel_after_n_states,
-time_created, and time_completed. The `job_group_parents` table stores
+time_created, and time_completed. The `job_group_self_and_ancestors` table stores
 the parent child relationships between job groups densely as an
 ancestors table. The following tables will now be parameterized by
 both (batch_id, job_group_id) instead of (batch_id) with the default
@@ -276,6 +276,23 @@ equivalent of `mkdir -p`. Subsequently, when jobs are created, the
 request must define which job group the job is a member of. Note that
 job groups are independent of batch updates -- a job can be added to
 an already existing job group from a previous update.
+
+The client will create job groups as part of a batch update
+operation. This is analogous to how jobs are currently submitted.  The
+reason for creating jobs in an atomic operation rather than as a
+separate operation is to preserve atomicity in the event of a
+failure. From the user's perspective, they assume that `b.run()` is an
+atomic operation. If an error occurs during submission, then the user
+shouldn't see partially submitted jobs or job groups in the
+UI. Instead, they shouldn't "exist" until the update has been
+committed. The `batch_updates` table will have two new fields that are
+used to reserve a block of job group IDs: `start_job_group_id` and
+`n_job_groups`.  The client can then reference relative `in_update`
+job group IDs within the update request and all job group IDs within
+the update are guaranteed to be contiguous. By using the
+`batch_updates` framework and creating a reservation through an
+update, we allow multiple clients to be creating job groups to the
+same batch simultaneously.
 
 
 ******************
