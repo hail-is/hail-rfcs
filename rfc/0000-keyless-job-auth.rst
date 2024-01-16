@@ -46,9 +46,9 @@ to 90 days.
 
 Cloud providers avoid persisting long-lived credentials on user machines through
 the Metadata Server interface, an HTTP endpoint available on a
-`link-local https://en.wikipedia.org/wiki/Link-local_address`_ address which can
+`link-local <https://en.wikipedia.org/wiki/Link-local_address>`_ address which can
 issue access tokens for the identity assigned to the virtual machine. Available
-metadata in GCP is described [here](https://cloud.google.com/compute/docs/metadata/predefined-metadata-keys). This interface has the following advantages:
+metadata in GCP is described `here <https://cloud.google.com/compute/docs/metadata/predefined-metadata-keys>`_. This interface has the following advantages:
 
 - Unlike long-lived keys, these tokens are short-lived (e.g. 1 hour), reducing
   the potential attack window following exfiltration.
@@ -90,76 +90,80 @@ the same in Azure.
 Current System
 ==============
 
-+-----+                                                +-----+              +-----+
-| Job |                                                | IAM |              | GCS |
-+-----+                                                +-----+              +-----+
-   | --------------------------------------------------\  |                    |
-   |-| Cook up request for access token using key file |  |                    |
-   | |-------------------------------------------------|  |                    |
-   |                                                      |                    |
-   | https://www.googleapis.com/oauth2/v4/token           |                    |
-   |----------------------------------------------------->|                    |
-   |                                                      | ----------------\  |
-   |                                                      |-| Validate key  |  |
-   |                                                      | |---------------|  |
-   |                                                      |                    |
-   |                          Access Token scoped for GCS |                    |
-   |<-----------------------------------------------------|                    |
-   |                                                      |                    |
-   | Access Token                                         |                    |
-   |-------------------------------------------------------------------------->|
-   |                                                      |                    | -----------------------------------\
-   |                                                      |                    |-| Validate access token and scopes |
-   |                                                      |                    | |----------------------------------|
-   |                                                      |                    |
-   |                                                      |               File |
-   |<--------------------------------------------------------------------------|
-   |                                                      |                    |
+.. code-block:: text
+
+    +-----+                                                +-----+              +-----+
+    | Job |                                                | IAM |              | GCS |
+    +-----+                                                +-----+              +-----+
+       | --------------------------------------------------\  |                    |
+       |-| Cook up request for access token using key file |  |                    |
+       | |-------------------------------------------------|  |                    |
+       |                                                      |                    |
+       | https://www.googleapis.com/oauth2/v4/token           |                    |
+       |----------------------------------------------------->|                    |
+       |                                                      | ----------------\  |
+       |                                                      |-| Validate key  |  |
+       |                                                      | |---------------|  |
+       |                                                      |                    |
+       |                          Access Token scoped for GCS |                    |
+       |<-----------------------------------------------------|                    |
+       |                                                      |                    |
+       | Access Token                                         |                    |
+       |-------------------------------------------------------------------------->|
+       |                                                      |                    | -----------------------------------\
+       |                                                      |                    |-| Validate access token and scopes |
+       |                                                      |                    | |----------------------------------|
+       |                                                      |                    |
+       |                                                      |               File |
+       |<--------------------------------------------------------------------------|
+       |                                                      |                    |
 
 
 Proposed Model
 ==============
 
-+-----+                                                                                +---------+                                              +-----+              +-----+
-| Job |                                                                                | Worker  |                                              | IAM |              | GCS |
-+-----+                                                                                +---------+                                              +-----+              +-----+
-   |                                                                                        |                                                      |                    |
-   | http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token      |                                                      |                    |
-   |--------------------------------------------------------------------------------------->|                                                      |                    |
-   |                                                                                        | --------------------------------------------------\  |                    |
-   |                                                                                        |-| Cook up request for access token using key file |  |                    |
-   |                                                                                        | |-------------------------------------------------|  |                    |
-   |                                                                                        |                                                      |                    |
-   |                                                                                        | https://www.googleapis.com/oauth2/v4/token           |                    |
-   |                                                                                        |----------------------------------------------------->|                    |
-   |                                                                                        |                                                      | ----------------\  |
-   |                                                                                        |                                                      |-| Validate key  |  |
-   |                                                                                        |                                                      | |---------------|  |
-   |                                                                                        |                                                      |                    |
-   |                                                                                        |                          Access Token scoped for GCS |                    |
-   |                                                                                        |<-----------------------------------------------------|                    |
-   |                                                                                        |                                                      |                    |
-   |                                                                           Access Token |                                                      |                    |
-   |<---------------------------------------------------------------------------------------|                                                      |                    |
-   |                                                                                        |                                                      |                    |
-   | Access Token                                                                           |                                                      |                    |
-   |------------------------------------------------------------------------------------------------------------------------------------------------------------------->|
-   |                                                                                        |                                                      |                    | -----------------------------------\
-   |                                                                                        |                                                      |                    |-| Validate access token and scopes |
-   |                                                                                        |                                                      |                    | |----------------------------------|
-   |                                                                                        |                                                      |                    |
-   |                                                                                        |                                                      |               File |
-   |<-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-   |                                                                                        |                                                      |                                      |
+.. code-block:: text
+
+    +-----+                                                                                +---------+                                              +-----+              +-----+
+    | Job |                                                                                | Worker  |                                              | IAM |              | GCS |
+    +-----+                                                                                +---------+                                              +-----+              +-----+
+       |                                                                                        |                                                      |                    |
+       | http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token      |                                                      |                    |
+       |--------------------------------------------------------------------------------------->|                                                      |                    |
+       |                                                                                        | --------------------------------------------------\  |                    |
+       |                                                                                        |-| Cook up request for access token using key file |  |                    |
+       |                                                                                        | |-------------------------------------------------|  |                    |
+       |                                                                                        |                                                      |                    |
+       |                                                                                        | https://www.googleapis.com/oauth2/v4/token           |                    |
+       |                                                                                        |----------------------------------------------------->|                    |
+       |                                                                                        |                                                      | ----------------\  |
+       |                                                                                        |                                                      |-| Validate key  |  |
+       |                                                                                        |                                                      | |---------------|  |
+       |                                                                                        |                                                      |                    |
+       |                                                                                        |                          Access Token scoped for GCS |                    |
+       |                                                                                        |<-----------------------------------------------------|                    |
+       |                                                                                        |                                                      |                    |
+       |                                                                           Access Token |                                                      |                    |
+       |<---------------------------------------------------------------------------------------|                                                      |                    |
+       |                                                                                        |                                                      |                    |
+       | Access Token                                                                           |                                                      |                    |
+       |------------------------------------------------------------------------------------------------------------------------------------------------------------------->|
+       |                                                                                        |                                                      |                    | -----------------------------------\
+       |                                                                                        |                                                      |                    |-| Validate access token and scopes |
+       |                                                                                        |                                                      |                    | |----------------------------------|
+       |                                                                                        |                                                      |                    |
+       |                                                                                        |                                                      |               File |
+       |<-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+       |                                                                                        |                                                      |                    |
 
 
 It is worth emphasizing that the purpose of this feature is *not* to provide a
 fully complete and compliant metadata server to Hail Batch. Rather, the aim is to provide the
 minimum functionality necessary to allow Hail libraries and popular first-party
-tools like `gcloud` and `az` the ability to obtain short-lived credentials without
+tools like ``gcloud`` and ``az`` the ability to obtain short-lived credentials without
 exposing key files to user code. As such, an implementation may implement just the
-endpoints necessary to run the below examples for at least one version of `gcloud`/`az`
-and all supported versions of `hail`.
+endpoints necessary to run the below examples for at least one version of ``gcloud``/``az``
+and all supported versions of ``hail``.
 
 
 Examples
@@ -168,6 +172,7 @@ Examples
 Under the proposed change, the following Batch job commands should succeed:
 
 .. code-block:: python
+
    j.command('gcloud storage ls <MY_BUCKET>')
    j.command('hailctl batch submit <MY_SCRIPT>')
 
@@ -189,16 +194,16 @@ Inspiration & Alternatives
 --------------------------
 
 We can look to the Kubernetes project for examples of integrating with cloud
-identity providers. In particular, we will examine [GKE's Workload Identity](https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#what_is).
+identity providers. In particular, we will examine `GKE's Workload Identity <https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#what_is>`_.
 Workload identity allows pods to obtain credentials for GCP IAM identities. To
-do so, GKE runs the [GKE Metadata Server](https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#metadata_server)
+do so, GKE runs the `GKE Metadata Server <https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#metadata_server>`_
 which functions similarly to what is described in this proposal.
 
 The difference arises in how the metadata server fulfills the user's request for
 an access token. Unlike in this proposal, GKE nodes do not hold IAM credentials.
 Instead, it uses OIDC to "trade" a Kubernetes Service Account credential for a
-[preconfigured IAM credential](https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#credential-flow). This has the advantage of not needing to distribute IAM
+`preconfigured IAM credential <https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#credential-flow>`_. This has the advantage of not needing to distribute IAM
 credentials in GKE and enabling fine-grained mapping between GKE and IAM identities.
 However, OIDC is not easily applicable in Hail Batch because Batch is not an
 identity provider. We could remove the storage and distribution of key files in GCP by
-using [IAM Service Account Impersonation](https://cloud.google.com/docs/authentication/use-service-account-impersonation), but that is outside the scope of this RFC.
+using `IAM Service Account Impersonation <https://cloud.google.com/docs/authentication/use-service-account-impersonation>`_, but that is outside the scope of this RFC.
