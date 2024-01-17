@@ -19,13 +19,13 @@ Keyless Cloud Authentication in Hail Batch Jobs
 In a Hail Batch pipeline, all user code runs under one of two identities associated
 with the underlying cloud platform. On the user's computer, code runs as the user's
 human identity. Inside a Batch job running in the cloud, the job is running as a
-Hail-managed identity created for that user on signup. We will refer to this
+Hail-managed identity created for that user on signup. We will refer to these
 identities as the user's Human Identity and the Robot Identity, respectively.
 
-In the current system, Batch jobs are given access to the users' robot identity
+In the current system, Batch jobs are given access to the user's robot identity
 through a file planted in the job's filesystem containing the identity's
 credentials. In GCP, the credentials are a GSA key file. In Azure, the credentials
-are a username/password for a AAD Service Principal. These credentials are created,
+are a username/password for a Microsoft Entra ID Service Principal. These credentials are created,
 stored, and rotated by the Hail Batch system. 
 
 
@@ -54,7 +54,7 @@ metadata in GCP is described `here <https://cloud.google.com/compute/docs/metada
   the potential attack window following exfiltration.
 - The metadata server can be configured only to issue certain scopes, so the
   operations a job can perform may be restricted. It is not possible to scope
-  GSA keys and AAD SP client secrets.
+  GSA keys and Microsoft Entra ID SP client secrets.
 
 This proposal seeks to provide an emulated metadata server to Batch jobs and remove
 jobs' dependence on long-lived credentials.
@@ -189,6 +189,25 @@ So long as the firewall rules are correctly configured to redirect metadata traf
 to the Batch worker, there should be no adverse interactions with the existing
 system as such traffic was previously forbidden.
 
+It is worth noting that this change is motivated by ultimately removing key files
+from jobs' filesystems. This means that in the future, any user jobs that explicitly
+rely on the key file by directly referencing ``/gsa-key/key.json`` or
+``$GOOGLE_APPLICATION_CREDENTIALS`` will break. However, such breakages should
+be easy to fix largely by removing code, as the metadata server implementation
+should be compatible with the default credential retrieval mechanisms of the GCP
+and Azure client libraries. For example, the current Batch documentation includes
+the following snippet to authenticate ``gcloud`` in a Batch job:
+
+.. code-block:: bash
+
+   gcloud -q auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+
+
+Users who use ``gcloud`` in their jobs use this to authenticate ``gcloud``
+as their robot identity. This line would break without the key file present,
+but with the metadata server in place ``gcloud`` does not need to be explicitly
+authenticated, so this line can be safely deleted.
+
 
 Inspiration & Alternatives
 --------------------------
@@ -204,6 +223,16 @@ an access token. Unlike in this proposal, GKE nodes do not hold IAM credentials.
 Instead, it uses OIDC to "trade" a Kubernetes Service Account credential for a
 `preconfigured IAM credential <https://cloud.google.com/kubernetes-engine/docs/concepts/workload-identity#credential-flow>`_. This has the advantage of not needing to distribute IAM
 credentials in GKE and enabling fine-grained mapping between GKE and IAM identities.
-However, OIDC is not easily applicable in Hail Batch because Batch is not an
-identity provider. We could remove the storage and distribution of key files in GCP by
-using `IAM Service Account Impersonation <https://cloud.google.com/docs/authentication/use-service-account-impersonation>`_, but that is outside the scope of this RFC.
+
+OIDC is not easily applicable in Hail Batch because Batch is at present not an
+identity provider. There is no equivalent of Kubernetes Service Accounts that Hail Batch
+provides for users, it simply manages identities from the underlying cloud provider.
+One *could* in the future build an identity platform into the Hail system, which
+combined with OIDC could provide seamless resource access between hail systems across
+clouds, but that is not currently suffiently motivated and out of scope of this change.
+
+Regarding secrets handling, we could remove the storage and distribution of key files in GCP by
+using `IAM Service Account Impersonation <https://cloud.google.com/docs/authentication/use-service-account-impersonation>`_,
+allowing the Batch Worker identity to request access tokens for robot identities
+without holding key files. Such a change should be quite small, but outside the scope
+of this RFC.
