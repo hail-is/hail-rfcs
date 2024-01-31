@@ -22,7 +22,7 @@
 
 ### consolidate channels
 
-
+<img width="267" alt="261082794-ceb3798c-0551-4b84-87b0-bf58b89f6263" src="https://github.com/iris-garden/hail-rfcs/assets/84595986/f6e31537-1583-476e-931c-8d985dde0a57">
 
 * `#linalg`, `#test`, `#zulip`
   * no replacement needed
