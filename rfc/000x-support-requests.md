@@ -4,8 +4,19 @@
 
 ### main support channel
 
-* update the template and available labels to allow users to narrow the scope of
-  the triage
+#### old template
+
+<img width="1125" alt="Screenshot 2024-01-31 at 12 28 40" src="https://github.com/iris-garden/hail-rfcs/assets/84595986/a49aa5eb-cc6e-4d6a-ac4e-a52c39c1df55">
+
+<img width="824" alt="Screenshot 2024-01-31 at 12 28 52" src="https://github.com/iris-garden/hail-rfcs/assets/84595986/47802f51-7440-4d3a-948d-173537bba786">
+
+#### new template
+
+<img width="746" alt="Screenshot 2024-01-31 at 12 27 21" src="https://github.com/iris-garden/hail-rfcs/assets/84595986/f4863dc4-1e37-46cb-a199-001c1b958f95">
+
+<img width="830" alt="Screenshot 2024-01-31 at 12 28 05" src="https://github.com/iris-garden/hail-rfcs/assets/84595986/5f03e2ab-b686-4375-bf3d-9866397089fb">
+
+* additionally, labels for query support and batch support to be added
 
 ## discourse (discuss.hail.is)
 
