@@ -3,15 +3,9 @@ Keyless Cloud Authentication in Hail Batch Jobs
 ===============================================
 
 .. author:: Daniel Goldstein
-.. date-accepted:: Leave blank. This will be filled in when the proposal is accepted.
-.. ticket-url:: Leave blank. This will eventually be filled with the
-                ticket URL which will track the progress of the
-                implementation of the feature.
-.. implemented:: Leave blank. This will be filled in with the first Hail version which
-                 implements the described feature.
-.. header:: This proposal is `discussed at this pull request <https://github.com/hail-is/hail-rfc/pull/0>`_.
-            **After creating the pull request, edit this file again, update the
-            number in the link, and delete this bold sentence.**
+.. date-accepted:: 2024-02-01
+.. implemented:: https://github.com/hail-is/hail/pull/14019
+.. header:: This proposal is `discussed at this pull request <https://github.com/hail-is/hail-rfc/pull/12>`_.
 .. sectnum::
 .. contents::
 .. role::
