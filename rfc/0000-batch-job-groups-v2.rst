@@ -181,15 +181,15 @@ batch has been cancelled is maintained in the table
 Billing
 *******
 
-The table `aggregated_batch_resources_v2` keeps track of the
+The table `aggregated_batch_resources_v3` keeps track of the
 aggregated usage per resource per batch. This table is kept up-to-date
 via two triggers: `attempt_resources_after_insert` and
 `attempts_after_update`. When we insert new resources for an attempt,
 the `attempt_resources_after_insert` trigger adds new records or
 updates existing records for that batch into the
-`aggregated_batch_resources_v2` table for any usage of resources that
+`aggregated_batch_resources_v3` table for any usage of resources that
 has already occurred. Likewise, the `attempts_after_update` trigger
-updates the `aggregated_batch_resources_v2` when the duration of the
+updates the `aggregated_batch_resources_v3` when the duration of the
 attempt is updated in the database using a rollup time for
 intermediate billing updates.
 
@@ -216,19 +216,22 @@ here, the underlying job groups structure proposed can easily be used
 to address the UI issues described in the Motivation section.
 
 More concretely, we will create two new tables: `job_groups` and
-`job_group_self_and_ancestors`. The `job_groups` table stores information about
-the job group such as the n_jobs, callback, cancel_after_n_states,
-time_created, and time_completed. The `job_group_self_and_ancestors` table stores
-the parent child relationships between job groups densely as an
-ancestors table. The following tables will now be parameterized by
-both (batch_id, job_group_id) instead of (batch_id) with the default
-value for job_group_id being 0, which is the root job group:
+`job_group_self_and_ancestors`. The `job_groups` table stores
+information about the job group such as the n_jobs, callback,
+cancel_after_n_states, time_created, and time_completed. The
+`job_group_self_and_ancestors` table stores the parent child
+relationships between job groups densely as an ancestors table. The
+following tables will now be parameterized by both (batch_id,
+job_group_id) instead of (batch_id) with the default value for
+job_group_id being 0, which is the root job group. Note, the names of
+the tables have been changed to account for being keyed by
+job_group_id as well as batch_id.
 
-- `batches_cancelled`
-- `aggregated_batch_resources_v2`
-- `batches_inst_coll_cancellable_resources`
-- `batch_attributes`
-- `batches_n_jobs_in_complete_states`
+- `job_groups_cancelled`
+- `aggregated_job_group_resources_v3`
+- `job_groups_inst_coll_cancellable_resources`
+- `job_group_attributes`
+- `job_groups_n_jobs_in_complete_states`
 
 The following are the primary keys for key Batch concepts. Note that the
 primary key for a job has not changed and is not parameterized by the job
@@ -242,15 +245,20 @@ In addition, note that the `batch_updates` table is not parameterized
 by a job group id because an update is a separate concept and an
 update can contain jobs from multiple job groups. The update is just
 the staged "transaction" of changes to be made to the batch rather
-than the job organization.
+than the job organization. Creating job groups is also part of a batch
+update and mirrors how jobs are tracked in an update. This allows partially
+submitted job groups to be hidden from the user until the job groups are
+finally committed.
 
 The front end will need the following new REST endpoints:
 
 - GET /api/v1alpha/batches/{batch_id}/job_groups
 - GET /api/v1alpha/batches/{batch_id}/job_groups/{job_group_id}
-- POST /api/v1alpha/batches/{batch_id}/job_groups
-- PATCH
-  /api/v1alpha/batches/{batch_id}/job_groups/{job_group_id}/cancel
+- GET /api/v1alpha/batches/{batch_id}/job-groups/{job_group_id}/jobs
+- GET /api/v2alpha/batches/{batch_id}/job-groups/{job_group_id}/jobs
+- GET /api/v1alpha/batches/{batch_id}/job-groups/{job_group_id}/job-groups
+- GET /api/v1alpha/batches/{batch_id}/updates/{update_id}/job-groups/create
+- PATCH /api/v1alpha/batches/{batch_id}/job_groups/{job_group_id}/cancel
 
 
 We describe the following key operations in more detail below.
@@ -266,20 +274,20 @@ We describe the following key operations in more detail below.
 Job Group Creation
 ******************
 
-A job group is created upfront and is empty. Each job group has an
-identifier that is keyed by (batch_id, job_group_id). It also has a
-human-readable string path identifier. The root job group is "/" and
-always has job group ID equal to 1. All job groups must be explicitly
-created by the user and all parent job groups must be created before
-their child job groups. In other words, we will not support the
-equivalent of `mkdir -p`. Subsequently, when jobs are created, the
-request must define which job group the job is a member of. Note that
-job groups are independent of batch updates -- a job can be added to
-an already existing job group from a previous update.
+A root job group is created during batch creation upfront and is
+empty. The root job group ID is equal to 0. The reason for choosing 0
+instead of 1 is this job group is special, was system-created, and we
+wanted user-created job groups to start being numbered with 1. All
+remaining job groups must be explicitly created by the user and all
+parent job groups must be created before their child job groups. When
+jobs are created, the request must define which job group the job is a
+member of. Note that job groups are independent of batch updates -- a
+job can be added to an already existing job group created in a
+previous update.
 
 The client will create job groups as part of a batch update
-operation. This is analogous to how jobs are currently submitted.  The
-reason for creating jobs in an atomic operation rather than as a
+operation. This is analogous to how jobs are currently submitted. The
+reason for creating job groups in an atomic operation rather than as a
 separate operation is to preserve atomicity in the event of a
 failure. From the user's perspective, they assume that `b.run()` is an
 atomic operation. If an error occurs during submission, then the user
@@ -295,19 +303,21 @@ update, we allow multiple clients to be creating job groups to the
 same batch simultaneously.
 
 
-******************
-Getting the Status
-******************
+*****************************
+Getting the Job States Status
+*****************************
 
 There is no change in how states are tracked from the current system
 as we are reusing the existing `batches_n_jobs_in_complete_states`
-table by adding a new key which is the job group ID. We know the root
-job group is equivalent to the entire batch and can query for that row
-specifically when interested in a batch. The update when marking a job
-complete is still one query, but is more complicated with a join on
-the new `job_group_parents` table that propagates the state increment
-to the corresponding rows in the job group tree. To ensure this
-operation is fast, we will limit the depth of the job group tree to 5.
+(now `job_groups_n_jobs_in_complete_states`) table by adding a new key
+which is the job group ID. We know the root job group is equivalent to
+the entire batch and can query for that row specifically when
+interested in a batch. The update when marking a job complete is still
+one query, but is more complicated with a join on the new
+`job_self_and_ancestors` table that propagates the state increment to
+the corresponding rows in the sum-total tables such as
+`job_group_inst_coll_cancellable_resources`. To ensure this operation
+is fast, we will limit the depth of the job group tree to 5.
 
 
 ************
@@ -315,19 +325,25 @@ Cancellation
 ************
 
 An entry for the new job group is inserted as an additional row into
-the `batch_inst_coll_cancellable_resources` table upon job group
+the `job_group_inst_coll_cancellable_resources` table upon job group
 creation. The `jobs_after_update` trigger will update the rows after a
 job state change, but the queries are more complicated because we need
 to update all rows for job groups the job is a member of. We use the
-new `job_group_parents` table to propagate the updates up the job
-group tree. When a job group is cancelled, we subtract the number of
-cancellable cores in that job group from all parent job groups up the
-tree and then delete all rows corresponding to the job group and child
-job groups from the `batch_inst_coll_cancellable_resources`
-table. This deletion operation has to delete O(n_children) job groups,
-so we need to put a limit on the total number of job groups allowed in
-the batch to 10K to ensure the deletion query can complete in less
-than a second.
+new `job_group_self_and_ancestors` table to propagate the updates up
+the job group tree. When a job group is cancelled, we subtract the
+number of cancellable cores in that job group from all parent job
+groups up the tree. We delete all rows corresponding to the job group
+and child job groups from the
+`job_group_inst_coll_cancellable_resources` table separately in a loop
+on the driver to make sure the `cancel_job_group` operation is
+O(n_ancestors) rather than O(n_children) which is unbounded. The
+`job_groups_cancelled` table only stores the job group ID of the job
+group that was requested to be cancelled. All queries that want to
+know if a job group has been cancelled have to do a join against the
+`job_group_self_and_ancestors` table to know if any ancestors have
+been cancelled on the front end and driver. The reason for not
+inserting all cancelled job groups densely is because inserting all of
+these rows would have to insert O(n_children) job groups.
 
 
 *******
@@ -336,7 +352,7 @@ Billing
 
 The `attempt_after_update` and `attempt_resources_after_insert`
 triggers will be modified to increment all rows in the
-`aggregated_batch_resources_v2` table corresponding to a job group
+`aggregated_job_group_resources_v3` table corresponding to a job group
 that job is a member of in the tree. To ensure this operation is fast,
 we will limit the depth of the job group tree to 5.
 
@@ -346,7 +362,7 @@ Job Group Completion
 ********************
 
 When a job is marked complete, all job groups the job is a member of
-are updated in the `batches_n_jobs_in_complete_states` table. We also
+are updated in the `job_groups_n_jobs_in_complete_states` table. We also
 check to see if the number of jobs in the job group is equal to the
 number completed. We are guaranteed that the job that sees the number
 of jobs equals the number completed is the last job to complete
@@ -505,3 +521,14 @@ Unresolved Questions
 --------------------
 
 None.
+
+
+------------------------
+Important Points to Note
+------------------------
+
+1. The `update_id` for the root job group is NULL. Therefore, in
+   queries that check for the existence of all committed job groups,
+   we need the extra condition (`batch_updates.committed OR
+   job_groups.job_group_id = 0`) to allow the root job group to be
+   included.
